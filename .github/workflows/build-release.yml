@@ -49,6 +49,33 @@ jobs:
           sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)/Contents/Developer"
           swift --version
 
+      - name: Import Developer ID certificate (optional)
+        if: steps.source.outputs.exists == 'true'
+        env:
+          APPLE_DEV_ID_P12: ${{ secrets.APPLE_DEV_ID_P12 }}
+          APPLE_DEV_ID_P12_PASSWORD: ${{ secrets.APPLE_DEV_ID_P12_PASSWORD }}
+        run: |
+          if [ -z "$APPLE_DEV_ID_P12" ]; then
+            echo "SIGN_IDENTITY=" >> "$GITHUB_ENV"
+            echo "::notice::No Developer ID secrets — ad-hoc build, no notarization."
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PW="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          printf '%s' "$APPLE_DEV_ID_P12" | base64 -d > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$APPLE_DEV_ID_P12_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PW" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | awk -F'"' '/Developer ID Application/{print $2; exit}')"
+          [ -n "$IDENTITY" ] || { echo "::error::p12 imported but no Developer ID Application identity found"; exit 1; }
+          echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
       - name: Build app + dmg
         if: steps.source.outputs.exists == 'true'
         working-directory: source
@@ -57,7 +84,36 @@ jobs:
         run: |
           VERSION="${TAG#v}"
           TC_CODE_VERSION="$VERSION" ./Scripts/bundle.sh
+          if [ -n "${SIGN_IDENTITY:-}" ]; then
+            # Real signature over the ad-hoc one: hardened runtime + timestamp,
+            # as notarization requires.
+            codesign --force --deep --options runtime --timestamp \
+              -s "$SIGN_IDENTITY" "dist/TC Code.app"
+            codesign --verify --deep --strict "dist/TC Code.app"
+          fi
           ./Scripts/make-dmg.sh
+
+      - name: Notarize + staple (optional)
+        if: steps.source.outputs.exists == 'true'
+        working-directory: source
+        env:
+          TAG: ${{ github.ref_name }}
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
+          APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
+        run: |
+          if [ -z "${SIGN_IDENTITY:-}" ] || [ -z "$APPLE_NOTARY_APPLE_ID" ]; then
+            echo "::notice::Notarization skipped (no identity or notary secrets)."
+            exit 0
+          fi
+          VERSION="${TAG#v}"
+          DMG="dist/TC-Code-${VERSION}.dmg"
+          xcrun notarytool submit "$DMG" --wait \
+            --apple-id "$APPLE_NOTARY_APPLE_ID" \
+            --team-id "$APPLE_NOTARY_TEAM_ID" \
+            --password "$APPLE_NOTARY_PASSWORD"
+          xcrun stapler staple "$DMG"
+          shasum -a 256 "$DMG"
 
       - name: Publish dmg as GitHub release
         if: steps.source.outputs.exists == 'true'
