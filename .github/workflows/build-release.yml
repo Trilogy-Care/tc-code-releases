@@ -1,0 +1,97 @@
+name: Build & Release
+
+# Triggered by a v* tag (mirrored here by the private tc-code repo's Release
+# workflow). Builds TC Code from the private source at that tag, publishes the
+# dmg as a GitHub Release on THIS repo, refreshes appcast.json on main (served
+# by GitHub Pages — the app's update feed), and bumps the Homebrew cask.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout releases repo (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: releases
+
+      - name: Checkout private source at tag
+        env:
+          SOURCE_DEPLOY_KEY: ${{ secrets.SOURCE_DEPLOY_KEY }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SOURCE_DEPLOY_KEY" > ~/.ssh/source_key
+          chmod 600 ~/.ssh/source_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/source_key -o IdentitiesOnly=yes" \
+            git clone --depth 1 --branch "$TAG" git@github.com:Trilogy-Care/tc-code.git source
+
+      - name: Select newest Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)/Contents/Developer"
+          swift --version
+
+      - name: Build app + dmg
+        working-directory: source
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          TC_CODE_VERSION="$VERSION" ./Scripts/bundle.sh
+          ./Scripts/make-dmg.sh
+
+      - name: Publish dmg as GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          gh release create "$TAG" "source/dist/TC-Code-${VERSION}.dmg" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "TC Code ${VERSION}" \
+            --notes "TC Code ${VERSION}. Install: \`brew install --cask --no-quarantine trilogy-care/tap/tc-code\` — or download the dmg and drag to Applications (ad-hoc signed: right-click → Open on first launch)." \
+          || gh release upload "$TAG" "source/dist/TC-Code-${VERSION}.dmg" \
+               --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Update appcast.json (the app's update feed, via Pages)
+        working-directory: releases
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/TC-Code-${VERSION}.dmg"
+          ../source/Scripts/appcast-add.sh appcast.json "$VERSION" "$URL" \
+            "../source/dist/TC-Code-${VERSION}.dmg"
+          git config user.name "tc-code-release-bot"
+          git config user.email "ops@trilogycare.com.au"
+          git add appcast.json
+          git commit -m "appcast: TC Code ${VERSION}"
+          git push origin main
+
+      - name: Bump Homebrew cask
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          SHA="$(shasum -a 256 "source/dist/TC-Code-${VERSION}.dmg" | cut -d' ' -f1)"
+          printf '%s\n' "$TAP_DEPLOY_KEY" > ~/.ssh/tap_key
+          chmod 600 ~/.ssh/tap_key
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/tap_key -o IdentitiesOnly=yes" \
+            git clone --depth 1 git@github.com:Trilogy-Care/homebrew-tap.git tap
+          cd tap
+          sed -i '' -E "s|^  version \".*\"|  version \"${VERSION}\"|" Casks/tc-code.rb
+          sed -i '' -E "s|^  sha256 \".*\"|  sha256 \"${SHA}\"|" Casks/tc-code.rb
+          git config user.name "tc-code-release-bot"
+          git config user.email "ops@trilogycare.com.au"
+          git add Casks/tc-code.rb
+          git commit -m "tc-code ${VERSION}"
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/tap_key -o IdentitiesOnly=yes" \
+            git push origin main
