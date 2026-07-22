@@ -13,13 +13,16 @@ installed copies need:
 
 ```sh
 brew tap trilogy-care/tc
-brew install --cask --no-quarantine tc-code
+brew install --cask tc-code
 ```
+
+(`--no-quarantine` no longer exists in Homebrew 6.)
 
 Or grab the latest dmg from
 [Releases](https://github.com/Trilogy-Care/tc-code-releases/releases) and drag
-**TC Code** into Applications. The app is ad-hoc signed (internal tool): on
-first launch, right-click → Open.
+**TC Code** into Applications. The app is ad-hoc signed (internal tool): if
+macOS blocks first launch, right-click → Open once, or run
+`xattr -dr com.apple.quarantine "/Applications/TC Code.app"`.
 
 Requires macOS 14+ (Apple Silicon).
 
