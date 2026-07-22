@@ -69,7 +69,7 @@ jobs:
           gh release create "$TAG" "source/dist/TC-Code-${VERSION}.dmg" \
             --repo "$GITHUB_REPOSITORY" \
             --title "TC Code ${VERSION}" \
-            --notes "TC Code ${VERSION}. Install: \`brew install --cask --no-quarantine trilogy-care/yogi/tc-code\` — or download the dmg and drag to Applications (ad-hoc signed: right-click → Open on first launch)." \
+            --notes "TC Code ${VERSION}. Install: \`brew install --cask trilogy-care/tc/tc-code\` — or download the dmg and drag to Applications. Ad-hoc signed: right-click → Open on first launch." \
           || gh release upload "$TAG" "source/dist/TC-Code-${VERSION}.dmg" \
                --repo "$GITHUB_REPOSITORY" --clobber
 
@@ -100,7 +100,7 @@ jobs:
           printf '%s\n' "$TAP_DEPLOY_KEY" > ~/.ssh/tap_key
           chmod 600 ~/.ssh/tap_key
           GIT_SSH_COMMAND="ssh -i ~/.ssh/tap_key -o IdentitiesOnly=yes" \
-            git clone --depth 1 git@github.com:Trilogy-Care/homebrew-yogi.git tap
+            git clone --depth 1 git@github.com:Trilogy-Care/homebrew-tc.git tap
           cd tap
           sed -i '' -E "s|^  version \".*\"|  version \"${VERSION}\"|" Casks/tc-code.rb
           sed -i '' -E "s|^  sha256 \".*\"|  sha256 \"${SHA}\"|" Casks/tc-code.rb
