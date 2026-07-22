@@ -12,7 +12,7 @@ installed copies need:
 ## Install
 
 ```sh
-brew tap trilogy-care/yogi
+brew tap trilogy-care/tc
 brew install --cask --no-quarantine tc-code
 ```
 

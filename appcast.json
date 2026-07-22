@@ -1,1 +1,11 @@
-{"releases": []}
+{
+  "releases": [
+    {
+      "version": "0.1.0",
+      "downloadURL": "https://github.com/Trilogy-Care/tc-code-releases/releases/download/v0.1.0/TC-Code-0.1.0.dmg",
+      "sha256": "7112e9c7af23d2b4fef353996895c2df63327f4f34c359938e6d72b67a6ef852",
+      "notes": "First TC Code build — multi-account Claude Code, model selection, in-app auto-update.",
+      "publishedAt": "2026-07-22T09:50:08Z"
+    }
+  ]
+}
